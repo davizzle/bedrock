@@ -1,0 +1,132 @@
+name: Deploy Retail Store App
+
+on:
+  # Auto-run after infra succeeds
+  workflow_run:
+    workflows: ["IaC - EKS Infra"]     # must exactly match the name: in infra.yml
+    types: [completed]
+  # Manual trigger (optional)
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "App release tag (e.g., v1.3.0) or 'latest'"
+        required: true
+        default: "v1.3.0"
+      namespace:
+        description: "Kubernetes namespace to deploy into"
+        required: true
+        default: "retail"
+
+env:
+  AWS_REGION: us-east-1                # <--- set your region
+  CLUSTER_NAME: bedrock-eks            # <--- set your cluster name
+  ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/bedrock-github-oidc
+  KUBECTL_VERSION: "1.29.0"
+
+jobs:
+  deploy:
+    # Only continue automatically if infra completed successfully
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    concurrency:
+      group: app-deploy-${{ github.ref }}
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          set -e
+          curl -sSL -o kubectl "https://s3.us-west-2.amazonaws.com/amazon-eks/${KUBECTL_VERSION}/2024-06-28/bin/linux/amd64/kubectl"
+          chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}"
+          kubectl get nodes
+
+      - name: Resolve namespace and manifest URL
+        id: cfg
+        shell: bash
+        run: |
+          # inputs only exist on workflow_dispatch; provide defaults for workflow_run
+          NS="${{ github.event.inputs.namespace }}"
+          REL="${{ github.event.inputs.release }}"
+          [ -z "$NS" ] && NS="retail"
+          [ -z "$REL" ] && REL="v1.3.0"
+          if [ "$REL" = "latest" ]; then
+            URL="https://github.com/aws-containers/retail-store-sample-app/releases/latest/download/kubernetes.yaml"
+          else
+            URL="https://github.com/aws-containers/retail-store-sample-app/releases/download/$REL/kubernetes.yaml"
+          fi
+          echo "namespace=$NS" >> "$GITHUB_OUTPUT"
+          echo "manifest_url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure namespace
+        run: |
+          kubectl get ns "${{ steps.cfg.outputs.namespace }}" || kubectl create ns "${{ steps.cfg.outputs.namespace }}"
+
+      - name: Apply retail-store app (includes in-cluster MySQL/Postgres/DynamoDB Local/RabbitMQ/Redis)
+        run: |
+          kubectl apply -n "${{ steps.cfg.outputs.namespace }}" -f "${{ steps.cfg.outputs.manifest_url }}"
+
+      - name: Wait for Deployments
+        run: |
+          kubectl -n "${{ steps.cfg.outputs.namespace }}" wait --for=condition=available --timeout=10m deployment --all
+
+      - name: Wait for StatefulSets (DBs and broker)
+        shell: bash
+        run: |
+          set -e
+          for s in catalog-mysql orders-postgresql orders-rabbitmq; do
+            echo "Waiting for StatefulSet/$s ..."
+            kubectl -n "${{ steps.cfg.outputs.namespace }}" rollout status statefulset/$s --timeout=10m
+          done
+
+      - name: Discover UI LoadBalancer hostname/IP
+        id: ui
+        shell: bash
+        run: |
+          set -e
+          for i in {1..60}; do
+            host="$(kubectl -n "${{ steps.cfg.outputs.namespace }}" get svc ui -o jsonpath='{.status.loadBalancer.ingress[0].hostname}{.status.loadBalancer.ingress[0].ip}')"
+            if [ -n "$host" ]; then
+              echo "host=$host" >> "$GITHUB_OUTPUT"
+              echo "UI: http://$host"
+              exit 0
+            fi
+            echo "Waiting for Service/ui external hostname... ($i/60)"
+            sleep 10
+          done
+          echo "UI LoadBalancer hostname not ready"; exit 1
+
+      - name: Health check
+        shell: bash
+        run: |
+          host="${{ steps.ui.outputs.host }}"
+          for i in {1..30}; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://$host/")"
+            echo "Attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 10
+          done
+          echo "UI did not return 200 within time window"; exit 1
+
+      - name: Summary
+        run: |
+          echo "## Retail Store Sample App deployed" >> $GITHUB_STEP_SUMMARY
+          echo "**Cluster**: ${CLUSTER_NAME}" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace**: ${{ steps.cfg.outputs.namespace }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Manifest**: ${{ steps.cfg.outputs.manifest_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "**UI URL**: http://${{ steps.ui.outputs.host }}" >> $GITHUB_STEP_SUMMARY
