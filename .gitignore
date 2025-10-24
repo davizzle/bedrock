@@ -42,6 +42,7 @@ kubeconfig
 # -----------------------
 *.log
 .terraform/
+infra/terraform/.terraform/
 *.tfstate
 *.tfstate.backup
 crash.log
