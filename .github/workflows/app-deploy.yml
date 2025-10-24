@@ -1,32 +1,24 @@
 name: Deploy Retail Store App
 
 on:
-  # Auto-run after infra succeeds
   workflow_run:
-    workflows: ["IaC - EKS Infra"]     # must exactly match the name: in infra.yml
+    workflows: ["IaC - EKS Infra"] 
     types: [completed]
-  # Manual trigger (optional)
+
   workflow_dispatch:
     inputs:
-      release:
-        description: "App release tag (e.g., v1.3.0) or 'latest'"
-        required: true
-        default: "v1.3.0"
-      namespace:
-        description: "Kubernetes namespace to deploy into"
-        required: true
-        default: "retail"
+      release:   { description: "v1.3.0 or 'latest'", required: true, default: "v1.3.0" }
+      namespace: { description: "K8s namespace",       required: true, default: "retail" }
 
 env:
-  AWS_REGION: us-east-1                # <--- set your region
-  CLUSTER_NAME: bedrock-eks            # <--- set your cluster name
-  ROLE_TO_ASSUME: arn:aws:iam::120217955965:role/bedrock-github-oidc
+  AWS_REGION: us-east-1               
+  CLUSTER_NAME: bedrock-eks 
+  ROLE_TO_ASSUME: arn:aws:iam::120217955965:role/github-oidc
   KUBECTL_VERSION: "1.29.0"
 
 jobs:
   deploy:
-    # Only continue automatically if infra completed successfully
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch'
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write

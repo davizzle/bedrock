@@ -11,7 +11,7 @@ on:
   workflow_dispatch: {}
 
 env:
-  AWS_REGION: us-east-1                # <--- set your region
+  AWS_REGION: us-east-1 
   ROLE_TO_ASSUME: arn:aws:iam::120217955965:role/github-oidc
   TF_WORKING_DIR: infra/terraform
 
@@ -20,7 +20,7 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      id-token: write      # OIDC
+      id-token: write  
       contents: read
       pull-requests: write
     concurrency:
