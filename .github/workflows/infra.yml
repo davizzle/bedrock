@@ -12,7 +12,7 @@ on:
 
 env:
   AWS_REGION: us-east-1                # <--- set your region
-  ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/bedrock-github-oidc
+  ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/github-oidc
   TF_WORKING_DIR: infra/terraform
 
 jobs:
