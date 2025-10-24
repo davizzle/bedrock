@@ -25,6 +25,4 @@ resource "aws_iam_user_policy_attachment" "dev_min_attach" {
   policy_arn = aws_iam_policy.dev_readonly_min.arn
 }
 
-output "dev_readonly_user_arn" {
-  value = aws_iam_user.dev_readonly.arn
-}
+

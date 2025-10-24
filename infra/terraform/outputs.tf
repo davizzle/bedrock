@@ -23,3 +23,7 @@ output "cluster_endpoint" {
 output "cluster_certificate_authority_data" {
   value = module.eks.cluster_certificate_authority_data
 }
+
+output "dev_readonly_user_arn" {
+  value = aws_iam_user.dev_readonly.arn
+}

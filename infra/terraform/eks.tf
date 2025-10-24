@@ -12,7 +12,7 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  enable_irsa = true  # needed later for AWS Load Balancer Controller
+  enable_irsa = true
 
   eks_managed_node_groups = {
     default = {
@@ -23,49 +23,58 @@ module "eks" {
     }
   }
 
-  # NEW: Grant read-only via EKS Access Entries (no aws-auth here)
-  access_entries = {
+  # Use merge() so CICD entry is added only when cicd_role_arn is set
+access_entries = merge(
+  var.cicd_role_arn == null ? {} : {
+    cicd = {
+      principal_arn = var.cicd_role_arn
+      policy_associations = {
+        admin = {
+          policy_arn  = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  },
+  var.admin_principal_arn == null ? {} : {
+    admin = {
+      principal_arn = var.admin_principal_arn
+      policy_associations = {
+        admin = {
+          policy_arn  = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  },
+  {
     dev_readonly = {
-      principal_arn = local.dev_user_arn
-      kubernetes_groups = ["eks-viewers"] 
-      # Attach AWS-managed read-only policy at cluster scope
+      principal_arn     = local.dev_user_arn
+      kubernetes_groups = ["eks-viewers"]  # not a reserved system: group
       policy_associations = {
         view = {
-          policy_arn = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
-          access_scope = { type = "cluster" } # or: { type = "namespace", namespaces = ["default"] }
+          policy_arn  = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+          access_scope = { type = "cluster" }
         }
       }
     }
   }
-
+)
 
   tags = { Project = "bedrock" }
 }
 
-# Kubernetes provider (so we can create RBAC after cluster exists)
+#---- Kubernetes provider (for RBAC) ----
 data "aws_eks_cluster" "this" {
   name = module.eks.cluster_name
 }
+
 data "aws_eks_cluster_auth" "this" {
   name = module.eks.cluster_name
 }
+
 provider "kubernetes" {
   host                   = data.aws_eks_cluster.this.endpoint
   cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
   token                  = data.aws_eks_cluster_auth.this.token
-}
-
-# Create a cluster-wide read-only binding for the "eks-viewers" group
-resource "kubernetes_cluster_role_binding" "viewer" {
-  metadata { name = "eks-viewers-view" }
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = "view"
-  }
-  subject {
-    kind      = "Group"
-    name      = "eks-viewers"
-    api_group = "rbac.authorization.k8s.io"
-  }
 }
