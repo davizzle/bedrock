@@ -41,6 +41,24 @@ jobs:
         with: 
           version: v1.29.0
 
+      - name: Allow this runner IP to call EKS API
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUNNER_IP="$(curl -s https://checkip.amazonaws.com | tr -d '\n')"
+          echo "Runner IP: $RUNNER_IP"
+          # fetch current CIDRs
+          CURR_JSON="$(aws eks describe-cluster --region "${AWS_REGION}" --name "${CLUSTER_NAME}" --query 'cluster.resourcesVpcConfig.publicAccessCidrs' --output json)"
+          # merge runner /32 if missing
+          NEW_JSON="$(jq -c --arg ip "${RUNNER_IP}/32" 'if index($ip) then . else . + [$ip] end' <<< "$CURR_JSON")"
+          # convert to comma-separated list for CLI
+          CIDRS_CSV="$(jq -r 'join(",")' <<< "$NEW_JSON")"
+          aws eks update-cluster-config \
+            --region "${AWS_REGION}" \
+            --name "${CLUSTER_NAME}" \
+            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs=${CIDRS_CSV}
+
+
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}"
