@@ -20,7 +20,7 @@ on:
 env:
   AWS_REGION: us-east-1                # <--- set your region
   CLUSTER_NAME: bedrock-eks            # <--- set your cluster name
-  ROLE_TO_ASSUME: arn:aws:iam::YOUR_ACCOUNT_ID:role/bedrock-github-oidc
+  ROLE_TO_ASSUME: arn:aws:iam::120217955965:role/bedrock-github-oidc
   KUBECTL_VERSION: "1.29.0"
 
 jobs:
