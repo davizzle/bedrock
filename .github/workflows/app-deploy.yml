@@ -47,17 +47,21 @@ jobs:
           set -euo pipefail
           RUNNER_IP="$(curl -s https://checkip.amazonaws.com | tr -d '\n')"
           echo "Runner IP: $RUNNER_IP"
-          # fetch current CIDRs
           CURR_JSON="$(aws eks describe-cluster --region "${AWS_REGION}" --name "${CLUSTER_NAME}" --query 'cluster.resourcesVpcConfig.publicAccessCidrs' --output json)"
-          # merge runner /32 if missing
           NEW_JSON="$(jq -c --arg ip "${RUNNER_IP}/32" 'if index($ip) then . else . + [$ip] end' <<< "$CURR_JSON")"
-          # convert to comma-separated list for CLI
           CIDRS_CSV="$(jq -r 'join(",")' <<< "$NEW_JSON")"
-          aws eks update-cluster-config \
-            --region "${AWS_REGION}" \
-            --name "${CLUSTER_NAME}" \
-            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs=${CIDRS_CSV}
-
+          UPD_ID="$(aws eks update-cluster-config \
+            --region "${AWS_REGION}" --name "${CLUSTER_NAME}" \
+            --resources-vpc-config endpointPublicAccess=true,endpointPrivateAccess=true,publicAccessCidrs=${CIDRS_CSV} \
+            --query 'update.id' --output text)"
+          # wait until the update finishes
+          for i in {1..30}; do
+            STATUS="$(aws eks describe-update --region "${AWS_REGION}" --name "${CLUSTER_NAME}" --update-id "$UPD_ID" --query 'update.status' --output text)"
+            echo "EKS endpoint update: $STATUS"
+            [ "$STATUS" = "Successful" ] && break
+            [ "$STATUS" = "Failed" ] && exit 1
+            sleep 5
+          done
 
       - name: Update kubeconfig
         run: |
