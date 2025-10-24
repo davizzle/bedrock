@@ -41,3 +41,10 @@ kubeconfig
 # Logs and misc
 # -----------------------
 *.log
+.terraform/
+*.tfstate
+*.tfstate.backup
+crash.log
+.terraform.lock.hcl
+*.zip
+*.exe
